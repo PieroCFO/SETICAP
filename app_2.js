@@ -1,16 +1,7 @@
-const express = require('express');
 const puppeteer = require('puppeteer');
 const randomUseragent = require('random-useragent');
 const axios = require('axios');
-const qs = require('querystring');
-
-const app = express();
-const PORT = 3000; // Puedes cambiarlo si necesitas otro puerto
-
-app.get('/ejecutar', async (req, res) => {
-  res.send("⏳ Ejecutando extracción del dólar...");
-  await simularLogin();
-});
+const qs = require('querystring'); // Para convertir a formato x-www-form-urlencoded
 
 const simularLogin = async () => {
   const browser = await puppeteer.launch({ headless: true, ignoreHTTPSErrors: true });
@@ -29,6 +20,8 @@ const simularLogin = async () => {
       page.waitForNavigation({ waitUntil: 'networkidle2' })
     ]);
 
+    console.log("Página actual luego del login:", page.url());
+
     await page.waitForSelector('div.mar-no.text-semibold.Home__content__ebQk', { timeout: 900000 });
 
     let valorDolar = '';
@@ -41,29 +34,47 @@ const simularLogin = async () => {
       );
 
       if (!valorDolar || valorDolar === '0') {
-        console.log('Esperando valor del dólar...');
+        console.log('Esperando que el valor del dólar esté disponible o sea mayor que 0...');
         intentos++;
-        await page.waitForTimeout(3000);
-        if (intentos >= 10) break;
+
+        await page.waitForFunction(
+          'document.querySelector("div.mar-no.text-semibold.Home__content__ebQk").textContent.trim() !== "" && document.querySelector("div.mar-no.text-semibold.Home__content__ebQk").textContent.trim() !== "0"',
+          { timeout: 3000 }
+        );
+
+        if (intentos >= 10) {
+          console.log("❌ No se pudo obtener el valor del dólar después de 10 intentos.");
+          break;
+        }
       }
     }
 
     if (valorDolar && valorDolar !== '0') {
       console.log("💵 Valor del dólar:", valorDolar);
-      const response = await axios.post(
-        'https://script.google.com/macros/s/AKfycbwlT18LiAIDTOdQ8_WBYAK-t2_3MzvN2BgOSTbyel24oZlmH6kiucl2AtsTbOVDXeSG/exec',
-        qs.stringify({ valorDolar }),
-        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
-      );
-      console.log('✅ Respuesta de Google Sheets:', response.data);
+      try {
+        console.log('🔎 Enviando el valor del dólar como texto plano:', valorDolar);
+
+        const response = await axios.post(
+          'https://script.google.com/macros/s/AKfycbwlT18LiAIDTOdQ8_WBYAK-t2_3MzvN2BgOSTbyel24oZlmH6kiucl2AtsTbOVDXeSG/exec',
+          qs.stringify({ valorDolar }), // 🔥 Aquí lo convertimos a texto plano
+          {
+            headers: {
+              'Content-Type': 'application/x-www-form-urlencoded'
+            }
+          }
+        );
+
+        console.log('✅ Respuesta del servidor:', response.data);
+      } catch (error) {
+        console.error('❌ Error al enviar el valor a Google Apps Script:', error.message);
+      }
     }
+
   } catch (err) {
-    console.error("❌ Error:", err.message);
+    console.error("❌ Error durante el scraping:", err.message);
   } finally {
-    await browser.close();
+    // await browser.close(); // Puedes activar esto cuando esté listo
   }
 };
 
-app.listen(PORT, () => {
-  console.log(`🚀 Servidor escuchando en http://localhost:${PORT}`);
-});
+simularLogin();
